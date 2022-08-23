@@ -25,8 +25,6 @@ use rp2040_hal::{
 #[used]
 pub static BOOT_LOADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
-//
-
 #[entry]
 fn main() -> ! {
     info!("Program start");
@@ -63,13 +61,13 @@ fn main() -> ! {
     let mut led_pin = pins.gpio9.into_push_pull_output();
     let mut led_pin2 = pins.gpio10.into_push_pull_output();
 
-    // main controller side UART pins
+    // main controller UART peripheral
     let c_uart_pins = (
         pins.gpio4.into_mode::<FunctionUart>(),
         pins.gpio5.into_mode::<FunctionUart>(),
     );
 
-    // upstream controller side UART pins
+    // downstream sensor pod UART peripheral
     let s_uart_pins = (
         pins.gpio16.into_mode::<FunctionUart>(),
         pins.gpio17.into_mode::<FunctionUart>(),
