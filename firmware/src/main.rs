@@ -106,7 +106,6 @@ fn main() -> ! {
         led_pin2.set_high().unwrap();
         delay.delay_ms(500);
         let acc_data = adx.accel_norm().unwrap();
-        writeln!(uart_c, "Hello World!\r").unwrap();
         writeln!(
             uart_c,
             "{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r",
