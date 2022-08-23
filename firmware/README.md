@@ -1,2 +1,2 @@
-# Example code for RP2040-based Sensor Pod
+# Starter code for RP2040-based Sensor Pod
 
