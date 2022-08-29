@@ -13,9 +13,10 @@ use panic_probe as _;
 
 use rp2040_hal::{
     clocks::{init_clocks_and_plls, Clock},
-    gpio::FunctionUart,
+    gpio::{FunctionUart, Interrupt},
     i2c::I2C,
     pac,
+    pac::interrupt,
     sio::Sio,
     uart::{self, UartPeripheral},
     watchdog::Watchdog,
@@ -61,6 +62,13 @@ fn main() -> ! {
     let mut led_pin = pins.gpio9.into_push_pull_output();
     let mut led_pin2 = pins.gpio10.into_push_pull_output();
 
+    let mut adxl_int_pin1 = pins.gpio18.into_pull_down_input();
+    let mut adxl_int_pin2 = pins.gpio18.into_pull_down_input();
+
+    adxl_int_pin1.set_interrupt_enabled(Interrupt::LevelHigh, true);
+    adxl_int_pin2.set_interrupt_enabled(Interrupt::LevelHigh, true);
+
+    
     // main controller UART peripheral
     let c_uart_pins = (
         pins.gpio4.into_mode::<FunctionUart>(),
@@ -96,6 +104,19 @@ fn main() -> ! {
 
     let mut adx = Adxl343::new(i2c).unwrap();
 
+    #[interrupt]
+    fn UART0_IRQ() {
+        info!("Remote signal received!");
+//        writeln!(uart_c, "Remote signal received!").unwrap();
+        // let mut buffer = [0u8; 3];
+        // let _bytes_read = uart_s.read_raw(&mut buffer);
+        // match _bytes_read {
+        //     Ok(v) => info!("here's some data: {:?}", v),
+        //     Err(e) => info!("error dude: {:?}", e),
+        // };
+        // writeln!(uart_c, "{:?}", buffer).unwrap();
+    }
+
     loop {
         info!("on!");
         led_pin.set_high().unwrap();
@@ -110,11 +131,15 @@ fn main() -> ! {
             uart_c,
             "{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r",
             acc_data.x, acc_data.y, acc_data.z
-        )
-        .unwrap();
+        ).unwrap();
         let mut buffer = [0u8; 3];
-        let mut _bytes_read = uart_s.read_raw(&mut buffer);
+        let _bytes_read = uart_s.read_raw(&mut buffer);
+        match _bytes_read {
+            Ok(v) => info!("here's some data: {:?}", v),
+            Err(e) => info!("error dude: {:?}", e),
+        };
         writeln!(uart_c, "{:?}", buffer).unwrap();
+
     }
 }
 
