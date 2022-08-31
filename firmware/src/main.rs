@@ -68,7 +68,6 @@ fn main() -> ! {
     adxl_int_pin1.set_interrupt_enabled(Interrupt::LevelHigh, true);
     adxl_int_pin2.set_interrupt_enabled(Interrupt::LevelHigh, true);
 
-    
     // main controller UART peripheral
     let c_uart_pins = (
         pins.gpio4.into_mode::<FunctionUart>(),
@@ -106,15 +105,11 @@ fn main() -> ! {
 
     #[interrupt]
     fn UART0_IRQ() {
-        info!("Remote signal received!");
-//        writeln!(uart_c, "Remote signal received!").unwrap();
-        // let mut buffer = [0u8; 3];
-        // let _bytes_read = uart_s.read_raw(&mut buffer);
-        // match _bytes_read {
-        //     Ok(v) => info!("here's some data: {:?}", v),
-        //     Err(e) => info!("error dude: {:?}", e),
-        // };
-        // writeln!(uart_c, "{:?}", buffer).unwrap();
+        let mut buffer = [0u8; 3];
+        let _bytes_read = uart_s.read_raw(&mut buffer);
+        if _bytes_read.is_ok() {
+            writeln!(uart_c, "{:?}", buffer).unwrap();
+        }
     }
 
     loop {
@@ -131,15 +126,13 @@ fn main() -> ! {
             uart_c,
             "{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r",
             acc_data.x, acc_data.y, acc_data.z
-        ).unwrap();
+        )
+        .unwrap();
         let mut buffer = [0u8; 3];
         let _bytes_read = uart_s.read_raw(&mut buffer);
-        match _bytes_read {
-            Ok(v) => info!("here's some data: {:?}", v),
-            Err(e) => info!("error dude: {:?}", e),
-        };
-        writeln!(uart_c, "{:?}", buffer).unwrap();
-
+        if _bytes_read.is_ok() {
+            writeln!(uart_c, "{:?}", buffer).unwrap();
+        }
     }
 }
 
