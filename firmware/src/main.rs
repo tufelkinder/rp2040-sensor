@@ -4,7 +4,7 @@
 
 extern crate alloc;
 
-use alloc::{vec::Vec, string::String, borrow::ToOwned};
+use alloc::{string::String};
 use alloc_cortex_m::CortexMHeap;
 use core::alloc::Layout;
 // use core::panic::PanicInfo;
@@ -163,14 +163,11 @@ fn main() -> ! {
         let _bytes_read = uart_s.read_raw(&mut buffer);
 
         if _bytes_read.is_ok() {
-            let mut output = Vec::<&str>::new();
-            let mut char_buff = [0u8; 4];
+            let mut output = String::new(); 
 
             for c in buffer {
                 if c != 0 {
-                    let mut s = String::new();
-                    let tmp = (c as char).encode_utf8(&mut char_buff).clone_into(&mut s);
-                    output.push(&s);
+                    output.push(c as char);
                 }
             }
             writeln!(uart_c, "{:?}", output).unwrap();
