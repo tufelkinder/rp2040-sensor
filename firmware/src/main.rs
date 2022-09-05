@@ -1,15 +1,25 @@
 #![no_std]
 #![no_main]
+#![feature(alloc_error_handler)]
+
+extern crate alloc;
+
+use alloc::{vec::Vec, string::String, borrow::ToOwned};
+use alloc_cortex_m::CortexMHeap;
+use core::alloc::Layout;
+// use core::panic::PanicInfo;
 
 use adxl343::{accelerometer::Accelerometer, Adxl343};
 use core::fmt::Write;
 use cortex_m_rt::entry;
-use defmt::*;
+// use defmt::*;
 use defmt_rtt as _;
 use embedded_hal::digital::v2::OutputPin;
 use embedded_time::fixed_point::FixedPoint;
 use embedded_time::rate::Extensions;
 use panic_probe as _;
+// use heapless::Vec;
+// use irq::{scoped_interrupts, handler, scope};
 
 use rp2040_hal::{
     clocks::{init_clocks_and_plls, Clock},
@@ -26,9 +36,28 @@ use rp2040_hal::{
 #[used]
 pub static BOOT_LOADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
+// scoped_interrupts! {
+//     enum Interrupts {
+//         UART0_IRQ,
+//     }
+
+//     use #[interrupt];
+// }
+
+#[global_allocator]
+static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
+
 #[entry]
 fn main() -> ! {
-    info!("Program start");
+
+    {
+        use core::mem::MaybeUninit;
+        const HEAP_SIZE: usize = 1024;
+        static mut HEAP: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+        unsafe { ALLOCATOR.init(HEAP.as_ptr() as usize, HEAP_SIZE) }
+    }
+
+    // info!("Program start");
     let mut periphs = pac::Peripherals::take().unwrap();
     let core = pac::CorePeripherals::take().unwrap();
     let mut watchdog = Watchdog::new(periphs.WATCHDOG);
@@ -62,8 +91,8 @@ fn main() -> ! {
     let mut led_pin = pins.gpio9.into_push_pull_output();
     let mut led_pin2 = pins.gpio10.into_push_pull_output();
 
-    let mut adxl_int_pin1 = pins.gpio18.into_pull_down_input();
-    let mut adxl_int_pin2 = pins.gpio18.into_pull_down_input();
+    let adxl_int_pin1 = pins.gpio19.into_pull_down_input();
+    let adxl_int_pin2 = pins.gpio18.into_pull_down_input();
 
     adxl_int_pin1.set_interrupt_enabled(Interrupt::LevelHigh, true);
     adxl_int_pin2.set_interrupt_enabled(Interrupt::LevelHigh, true);
@@ -105,19 +134,20 @@ fn main() -> ! {
 
     #[interrupt]
     fn UART0_IRQ() {
-        let mut buffer = [0u8; 3];
-        let _bytes_read = uart_s.read_raw(&mut buffer);
-        if _bytes_read.is_ok() {
-            writeln!(uart_c, "{:?}", buffer).unwrap();
-        }
+        // let mut buffer = [0u8; 3];
+        // let _bytes_read = uart_s.read_raw(&mut buffer);
+        // if _bytes_read.is_ok() {
+        //     writeln!(uart_c, "{:?}", buffer).unwrap();
+        // }
+        // info!("Remote signal received!");
     }
 
     loop {
-        info!("on!");
+        // info!("on!");
         led_pin.set_high().unwrap();
         led_pin2.set_low().unwrap();
         delay.delay_ms(500);
-        info!("off!");
+        // info!("off!");
         led_pin.set_low().unwrap();
         led_pin2.set_high().unwrap();
         delay.delay_ms(500);
@@ -128,12 +158,34 @@ fn main() -> ! {
             acc_data.x, acc_data.y, acc_data.z
         )
         .unwrap();
-        let mut buffer = [0u8; 3];
+
+        let mut buffer = [0u8; 16];
         let _bytes_read = uart_s.read_raw(&mut buffer);
+
         if _bytes_read.is_ok() {
-            writeln!(uart_c, "{:?}", buffer).unwrap();
+            let mut output = Vec::<&str>::new();
+            let mut char_buff = [0u8; 4];
+
+            for c in buffer {
+                if c != 0 {
+                    let mut s = String::new();
+                    let tmp = (c as char).encode_utf8(&mut char_buff).clone_into(&mut s);
+                    output.push(&s);
+                }
+            }
+            writeln!(uart_c, "{:?}", output).unwrap();
         }
     }
 }
+
+#[alloc_error_handler]
+fn oom(_: Layout) -> ! {
+    loop {}
+}
+
+// #[panic_handler]
+// fn panic(_: &PanicInfo) -> ! {
+//     loop {}
+// }
 
 // End of file
