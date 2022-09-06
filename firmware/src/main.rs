@@ -7,8 +7,8 @@ extern crate alloc;
 use alloc::{string::String};
 use alloc_cortex_m::CortexMHeap;
 use core::alloc::Layout;
-// use core::panic::PanicInfo;
 
+use core::panic::PanicInfo;
 use adxl343::{accelerometer::Accelerometer, Adxl343};
 use core::fmt::Write;
 use cortex_m_rt::entry;
@@ -19,7 +19,7 @@ use embedded_time::fixed_point::FixedPoint;
 use embedded_time::rate::Extensions;
 use panic_probe as _;
 // use heapless::Vec;
-// use irq::{scoped_interrupts, handler, scope};
+use irq::{scoped_interrupts, handler, scope};
 
 use rp2040_hal::{
     clocks::{init_clocks_and_plls, Clock},
@@ -36,13 +36,13 @@ use rp2040_hal::{
 #[used]
 pub static BOOT_LOADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
-// scoped_interrupts! {
-//     enum Interrupts {
-//         UART0_IRQ,
-//     }
+scoped_interrupts! {
+    enum Interrupts {
+        UART0_IRQ,
+    }
 
-//     use #[interrupt];
-// }
+    use #[interrupt];
+}
 
 #[global_allocator]
 static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
@@ -91,6 +91,8 @@ fn main() -> ! {
     let mut led_pin = pins.gpio9.into_push_pull_output();
     let mut led_pin2 = pins.gpio10.into_push_pull_output();
 
+    let mut ser_out = String::new(); 
+
     let adxl_int_pin1 = pins.gpio19.into_pull_down_input();
     let adxl_int_pin2 = pins.gpio18.into_pull_down_input();
 
@@ -132,47 +134,45 @@ fn main() -> ! {
 
     let mut adx = Adxl343::new(i2c).unwrap();
 
-    #[interrupt]
-    fn UART0_IRQ() {
-        // let mut buffer = [0u8; 3];
-        // let _bytes_read = uart_s.read_raw(&mut buffer);
-        // if _bytes_read.is_ok() {
-        //     writeln!(uart_c, "{:?}", buffer).unwrap();
-        // }
-        // info!("Remote signal received!");
-    }
-
-    loop {
-        // info!("on!");
-        led_pin.set_high().unwrap();
-        led_pin2.set_low().unwrap();
-        delay.delay_ms(500);
-        // info!("off!");
-        led_pin.set_low().unwrap();
-        led_pin2.set_high().unwrap();
-        delay.delay_ms(500);
-        let acc_data = adx.accel_norm().unwrap();
-        writeln!(
-            uart_c,
-            "{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r",
-            acc_data.x, acc_data.y, acc_data.z
-        )
-        .unwrap();
-
-        let mut buffer = [0u8; 16];
+    handler!(u0 = ||{
+        let mut buffer = [0u8; 64];
         let _bytes_read = uart_s.read_raw(&mut buffer);
 
         if _bytes_read.is_ok() {
-            let mut output = String::new(); 
-
             for c in buffer {
-                if c != 0 {
-                    output.push(c as char);
+                if c != 0 && c != 13 {
+                    ser_out.push(c as char);
+                } else {
+                    uart_c.write_str(&ser_out).unwrap();
+                    ser_out = String::new();
                 }
             }
-            writeln!(uart_c, "{:?}", output).unwrap();
         }
-    }
+    });
+
+    scope(|scope| {
+        scope.register(interrupt::UART0_IRQ, u0);
+
+        // The interrupts stay registered for the duration of this closure.
+        // This is a good place for the application's idle loop.
+        loop {
+            // info!("on!");
+            led_pin.set_high().unwrap();
+            // led_pin2.set_low().unwrap();
+            delay.delay_ms(500);
+            // info!("off!");
+            led_pin.set_low().unwrap();
+            // led_pin2.set_high().unwrap();
+            delay.delay_ms(500);
+            let acc_data = adx.accel_norm().unwrap();
+            writeln!(
+                uart_c,
+                "{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r",
+                acc_data.x, acc_data.y, acc_data.z
+            )
+            .unwrap();
+        }
+    });
 }
 
 #[alloc_error_handler]
