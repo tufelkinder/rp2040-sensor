@@ -4,13 +4,13 @@
 
 extern crate alloc;
 
-use alloc::{string::String};
+use alloc::string::String;
 use alloc_cortex_m::CortexMHeap;
 use core::alloc::Layout;
 
-use core::panic::PanicInfo;
 use adxl343::{accelerometer::Accelerometer, Adxl343};
 use core::fmt::Write;
+use core::panic::PanicInfo;
 use cortex_m_rt::entry;
 // use defmt::*;
 use defmt_rtt as _;
@@ -19,7 +19,7 @@ use embedded_time::fixed_point::FixedPoint;
 use embedded_time::rate::Extensions;
 use panic_probe as _;
 // use heapless::Vec;
-use irq::{scoped_interrupts, handler, scope};
+use irq::{handler, scope, scoped_interrupts};
 
 use rp2040_hal::{
     clocks::{init_clocks_and_plls, Clock},
@@ -39,6 +39,7 @@ pub static BOOT_LOADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 scoped_interrupts! {
     enum Interrupts {
         UART0_IRQ,
+        IO_IRQ_BANK0
     }
 
     use #[interrupt];
@@ -49,7 +50,6 @@ static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
 
 #[entry]
 fn main() -> ! {
-
     {
         use core::mem::MaybeUninit;
         const HEAP_SIZE: usize = 1024;
@@ -91,7 +91,7 @@ fn main() -> ! {
     let mut led_pin = pins.gpio9.into_push_pull_output();
     let mut led_pin2 = pins.gpio10.into_push_pull_output();
 
-    let mut ser_out = String::new(); 
+    let mut ser_out = String::new();
 
     let adxl_int_pin1 = pins.gpio19.into_pull_down_input();
     let adxl_int_pin2 = pins.gpio18.into_pull_down_input();
@@ -134,21 +134,23 @@ fn main() -> ! {
 
     let mut adx = Adxl343::new(i2c).unwrap();
 
-    handler!(u0 = ||{
-        let mut buffer = [0u8; 64];
-        let _bytes_read = uart_s.read_raw(&mut buffer);
+    handler!(
+        u0 = || {
+            let mut buffer = [0u8; 64];
+            let _bytes_read = uart_s.read_raw(&mut buffer);
 
-        if _bytes_read.is_ok() {
-            for c in buffer {
-                if c != 0 && c != 13 {
-                    ser_out.push(c as char);
-                } else {
-                    uart_c.write_str(&ser_out).unwrap();
-                    ser_out = String::new();
+            if _bytes_read.is_ok() {
+                for c in buffer {
+                    if c != 0 && c != 13 {
+                        ser_out.push(c as char);
+                    } else {
+                        uart_c.write_str(&ser_out).unwrap();
+                        ser_out = String::new();
+                    }
                 }
             }
         }
-    });
+    );
 
     scope(|scope| {
         scope.register(interrupt::UART0_IRQ, u0);
