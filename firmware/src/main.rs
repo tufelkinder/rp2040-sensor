@@ -57,7 +57,6 @@ fn main() -> ! {
         unsafe { ALLOCATOR.init(HEAP.as_ptr() as usize, HEAP_SIZE) }
     }
 
-    // info!("Program start");
     let mut periphs = pac::Peripherals::take().unwrap();
     let core = pac::CorePeripherals::take().unwrap();
     let mut watchdog = Watchdog::new(periphs.WATCHDOG);
@@ -164,17 +163,12 @@ fn main() -> ! {
         scope.register(Interrupt::UART0_IRQ, u0);
         scope.register(Interrupt::IO_IRQ_BANK0, gp0);
 
-        // The interrupts stay registered for the duration of this closure.
-        // This is a good place for the application's idle loop.
         loop {
-            // info!("on!");
             led_pin.set_high().unwrap();
-            // led_pin2.set_low().unwrap();
             delay.delay_ms(500);
-            // info!("off!");
             led_pin.set_low().unwrap();
-            // led_pin2.set_high().unwrap();
             delay.delay_ms(500);
+
             let acc_data = adx.accel_norm().unwrap();
             writeln!(
                 uart_c,
