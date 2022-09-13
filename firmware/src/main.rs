@@ -10,7 +10,6 @@ use core::alloc::Layout;
 
 use adxl343::{accelerometer::Accelerometer, Adxl343};
 use core::fmt::Write;
-use core::panic::PanicInfo;
 use cortex_m_rt::entry;
 // use defmt::*;
 use defmt_rtt as _;
@@ -23,7 +22,8 @@ use irq::{handler, scope, scoped_interrupts};
 
 use rp2040_hal::{
     clocks::{init_clocks_and_plls, Clock},
-    gpio::{FunctionUart, Interrupt},
+    gpio,
+    gpio::FunctionUart, // , Interrupt
     i2c::I2C,
     pac,
     pac::interrupt,
@@ -37,7 +37,7 @@ use rp2040_hal::{
 pub static BOOT_LOADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
 scoped_interrupts! {
-    enum Interrupts {
+    enum Interrupt {
         UART0_IRQ,
         IO_IRQ_BANK0
     }
@@ -96,8 +96,8 @@ fn main() -> ! {
     let adxl_int_pin1 = pins.gpio19.into_pull_down_input();
     let adxl_int_pin2 = pins.gpio18.into_pull_down_input();
 
-    adxl_int_pin1.set_interrupt_enabled(Interrupt::LevelHigh, true);
-    adxl_int_pin2.set_interrupt_enabled(Interrupt::LevelHigh, true);
+    adxl_int_pin1.set_interrupt_enabled(gpio::Interrupt::LevelHigh, true);
+    adxl_int_pin2.set_interrupt_enabled(gpio::Interrupt::LevelHigh, true);
 
     // main controller UART peripheral
     let c_uart_pins = (
@@ -152,8 +152,17 @@ fn main() -> ! {
         }
     );
 
+    handler!(
+        gp0 = || {
+            uart_c
+                .write_str("{id:1, alert: \"Motion Detected\"")
+                .unwrap();
+        }
+    );
+
     scope(|scope| {
-        scope.register(interrupt::UART0_IRQ, u0);
+        scope.register(Interrupt::UART0_IRQ, u0);
+        scope.register(Interrupt::IO_IRQ_BANK0, gp0);
 
         // The interrupts stay registered for the duration of this closure.
         // This is a good place for the application's idle loop.
@@ -174,7 +183,7 @@ fn main() -> ! {
             )
             .unwrap();
         }
-    });
+    })
 }
 
 #[alloc_error_handler]
