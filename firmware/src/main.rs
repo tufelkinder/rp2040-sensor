@@ -4,18 +4,21 @@
 
 extern crate alloc;
 
-use alloc::string::String;
+// use alloc::string::String;
 use alloc_cortex_m::CortexMHeap;
 use core::alloc::Layout;
 
 use adxl343::{accelerometer::Accelerometer, Adxl343};
+// use core::cell::RefCell;
 use core::fmt::Write;
+// use core::time::Duration;
+// use cortex_m::interrupt as core_int;
 use cortex_m_rt::entry;
 // use defmt::*;
 use defmt_rtt as _;
 use embedded_hal::digital::v2::OutputPin;
-use embedded_time::fixed_point::FixedPoint;
 use embedded_time::rate::Extensions;
+use embedded_time::{fixed_point::FixedPoint, Timer};
 use panic_probe as _;
 // use heapless::Vec;
 use irq::{handler, scope, scoped_interrupts};
@@ -88,9 +91,7 @@ fn main() -> ! {
     // let mut led_pin = pins.gpio0.into_push_pull_output();
     // let mut led_pin2 = pins.gpio25.into_push_pull_output();
     let mut led_pin = pins.gpio9.into_push_pull_output();
-    let mut led_pin2 = pins.gpio10.into_push_pull_output();
-
-    let mut ser_out = String::new();
+    // let mut led_pin2 = pins.gpio10.into_push_pull_output();
 
     let adxl_int_pin1 = pins.gpio19.into_pull_down_input();
     let adxl_int_pin2 = pins.gpio18.into_pull_down_input();
@@ -117,10 +118,14 @@ fn main() -> ! {
         .enable(uart::common_configs::_115200_8_N_1, uart_clocks)
         .unwrap();
 
+    // let mut UART_C: core_int::Mutex<RefCell<UartPeripheral>>> = core_int::Mutex<RefCell<uart_c>>;
+
     // downstream sensor pod UART peripheral
     let uart_s = UartPeripheral::new(periphs.UART0, s_uart_pins, &mut periphs.RESETS)
         .enable(uart::common_configs::_115200_8_N_1, uart_clocks)
         .unwrap();
+
+    //    cortex_m::interrupt::free(|cs| UART_C.borrow(cs).replace(Some(uart_c)));
 
     let i2c = I2C::i2c0(
         periphs.I2C0,
@@ -131,51 +136,35 @@ fn main() -> ! {
         125_000_000.Hz(),
     );
 
-    let mut adx = Adxl343::new(i2c).unwrap();
+    // let mut adx = Adxl343::new(i2c).unwrap();
 
     handler!(
-        u0 = || {
+        u0 = move || {
             let mut buffer = [0u8; 64];
             let _bytes_read = uart_s.read_raw(&mut buffer);
 
             if _bytes_read.is_ok() {
-                for c in buffer {
-                    if c != 0 && c != 13 {
-                        ser_out.push(c as char);
-                    } else {
-                        uart_c.write_str(&ser_out).unwrap();
-                        ser_out = String::new();
-                    }
-                }
+                let s: &str = core::str::from_utf8(&buffer).unwrap();
+                uart_c.write_str(&s).unwrap();
             }
         }
     );
 
-    handler!(
-        gp0 = || {
-            uart_c
-                .write_str("{id:1, alert: \"Motion Detected\"")
-                .unwrap();
-        }
-    );
+    // handler!(
+    //     gp0 = move || {
+    //         uart_c.write_str("{id:1, alert: \"Motion Detected\"").unwrap();
+    //     }
+    // );
 
     scope(|scope| {
         scope.register(Interrupt::UART0_IRQ, u0);
-        scope.register(Interrupt::IO_IRQ_BANK0, gp0);
+        // scope.register(Interrupt::IO_IRQ_BANK0, gp0);
 
         loop {
             led_pin.set_high().unwrap();
             delay.delay_ms(500);
             led_pin.set_low().unwrap();
             delay.delay_ms(500);
-
-            let acc_data = adx.accel_norm().unwrap();
-            writeln!(
-                uart_c,
-                "{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r",
-                acc_data.x, acc_data.y, acc_data.z
-            )
-            .unwrap();
         }
     })
 }
