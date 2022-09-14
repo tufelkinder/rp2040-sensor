@@ -8,7 +8,7 @@ extern crate alloc;
 use alloc_cortex_m::CortexMHeap;
 use core::alloc::Layout;
 
-use adxl343::{accelerometer::Accelerometer, Adxl343};
+use adxl343::{accelerometer::Accelerometer, Adxl343, register::Register};
 // use core::cell::RefCell;
 use core::fmt::Write;
 // use core::time::Duration;
@@ -136,7 +136,8 @@ fn main() -> ! {
         125_000_000.Hz(),
     );
 
-    // let mut adx = Adxl343::new(i2c).unwrap();
+    let mut adx = Adxl343::new(i2c).unwrap();
+    adx.write_register(adxl343::register::Register::INT_ENABLE, 1);
 
     handler!(
         u0 = move || {
