@@ -8,17 +8,17 @@ extern crate alloc;
 use alloc_cortex_m::CortexMHeap;
 use core::alloc::Layout;
 
-use adxl343::{accelerometer::Accelerometer, Adxl343, register::Register};
-// use core::cell::RefCell;
+use adxl343::{accelerometer::Accelerometer, Adxl343};  // , register::Register
+use core::cell::RefCell;
 use core::fmt::Write;
 // use core::time::Duration;
-// use cortex_m::interrupt as core_int;
+use cortex_m::interrupt::Mutex;
 use cortex_m_rt::entry;
 // use defmt::*;
 use defmt_rtt as _;
 use embedded_hal::digital::v2::OutputPin;
 use embedded_time::rate::Extensions;
-use embedded_time::{fixed_point::FixedPoint, Timer};
+use embedded_time::{fixed_point::FixedPoint};
 use panic_probe as _;
 // use heapless::Vec;
 use irq::{handler, scope, scoped_interrupts};
@@ -26,12 +26,12 @@ use irq::{handler, scope, scoped_interrupts};
 use rp2040_hal::{
     clocks::{init_clocks_and_plls, Clock},
     gpio,
-    gpio::FunctionUart, // , Interrupt
+    gpio::{FunctionUart, Pin, bank0::Gpio4, bank0::Gpio5}, // , Interrupt
     i2c::I2C,
     pac,
     pac::interrupt,
     sio::Sio,
-    uart::{self, UartPeripheral},
+    uart::{self, UartPeripheral, Enabled},
     watchdog::Watchdog,
 };
 
@@ -50,6 +50,11 @@ scoped_interrupts! {
 
 #[global_allocator]
 static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
+
+type MyUART = UartPeripheral<Enabled, rp2040_hal::uart::utils::UartDevice,
+    (Pin<Gpio4, FunctionUart>, Pin<Gpio5, FunctionUart>)>;
+
+static UART_C: Mutex<RefCell<MyUART>> = Mutex::new(RefCell::new(None));
 
 #[entry]
 fn main() -> ! {
@@ -104,15 +109,17 @@ fn main() -> ! {
         pins.gpio4.into_mode::<FunctionUart>(),
         pins.gpio5.into_mode::<FunctionUart>(),
     );
-
+ 
     // downstream sensor pod UART peripheral
     let s_uart_pins = (
         pins.gpio16.into_mode::<FunctionUart>(),
         pins.gpio17.into_mode::<FunctionUart>(),
     );
 
+    
     let uart_clocks = clocks.peripheral_clock.into();
 
+    
     // main controller UART peripheral
     let mut uart_c = UartPeripheral::new(periphs.UART1, c_uart_pins, &mut periphs.RESETS)
         .enable(uart::common_configs::_115200_8_N_1, uart_clocks)
@@ -121,7 +128,7 @@ fn main() -> ! {
     // let mut UART_C: core_int::Mutex<RefCell<UartPeripheral>>> = core_int::Mutex<RefCell<uart_c>>;
 
     // downstream sensor pod UART peripheral
-    let uart_s = UartPeripheral::new(periphs.UART0, s_uart_pins, &mut periphs.RESETS)
+    let mut uart_s = UartPeripheral::new(periphs.UART0, s_uart_pins, &mut periphs.RESETS)
         .enable(uart::common_configs::_115200_8_N_1, uart_clocks)
         .unwrap();
 
@@ -137,7 +144,7 @@ fn main() -> ! {
     );
 
     let mut adx = Adxl343::new(i2c).unwrap();
-    adx.write_register(adxl343::register::Register::INT_ENABLE, 1);
+    // adx.write_register(adxl343::register::Register::INT_ENABLE, 1);
 
     handler!(
         u0 = move || {
@@ -166,6 +173,22 @@ fn main() -> ! {
             delay.delay_ms(500);
             led_pin.set_low().unwrap();
             delay.delay_ms(500);
+            let acc_data = adx.accel_norm().unwrap();
+            writeln!(
+                uart_c,
+                "{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r",
+                acc_data.x, acc_data.y, acc_data.z
+            )
+            .unwrap();
+
+            // let mut buffer = [0u8; 64];
+            // let _bytes_read = uart_s.read_raw(&mut buffer);
+
+            // if _bytes_read.is_ok() {
+            //     let s: &str = core::str::from_utf8(&buffer).unwrap();
+            //     uart_c.write_str(&s).unwrap();
+            // }
+
         }
     })
 }
