@@ -4,8 +4,9 @@
 
 extern crate alloc;
 
-// use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc_cortex_m::CortexMHeap;
+use alloc::vec::Vec;
 use core::alloc::Layout;
 
 use adxl343::{accelerometer::Accelerometer, Adxl343};  // , register::Register
@@ -26,14 +27,16 @@ use irq::{handler, scope, scoped_interrupts};
 use rp2040_hal::{
     clocks::{init_clocks_and_plls, Clock},
     gpio,
-    gpio::{FunctionUart, Pin, bank0::Gpio4, bank0::Gpio5}, // , Interrupt
+    gpio::{bank0::{Gpio4, Gpio5}, Function, FunctionUart, Pin, Uart}, // , Interrupt, Pin, rp2040_hal::gpio::bank0::Gpio5;
     i2c::I2C,
     pac,
     pac::interrupt,
     sio::Sio,
-    uart::{self, UartPeripheral, Enabled},
+    uart::{self, Enabled, UartPeripheral},
     watchdog::Watchdog,
 };
+
+use crate::pac::UART1;
 
 #[link_section = ".boot_loader"]
 #[used]
@@ -51,10 +54,9 @@ scoped_interrupts! {
 #[global_allocator]
 static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
 
-type MyUART = UartPeripheral<Enabled, rp2040_hal::uart::utils::UartDevice,
-    (Pin<Gpio4, FunctionUart>, Pin<Gpio5, FunctionUart>)>;
+type UART = UartPeripheral<Enabled, UART1, (Pin<Gpio4, Function<Uart>>, Pin<Gpio5, Function<Uart>>)>;
 
-static UART_C: Mutex<RefCell<MyUART>> = Mutex::new(RefCell::new(None));
+static mut MSG_Q: Mutex<RefCell<Vec<String>>> = Mutex::new(RefCell::new(Vec::new()));
 
 #[entry]
 fn main() -> ! {
@@ -115,25 +117,21 @@ fn main() -> ! {
         pins.gpio16.into_mode::<FunctionUart>(),
         pins.gpio17.into_mode::<FunctionUart>(),
     );
-
     
     let uart_clocks = clocks.peripheral_clock.into();
-
     
     // main controller UART peripheral
     let mut uart_c = UartPeripheral::new(periphs.UART1, c_uart_pins, &mut periphs.RESETS)
         .enable(uart::common_configs::_115200_8_N_1, uart_clocks)
         .unwrap();
 
-    // let mut UART_C: core_int::Mutex<RefCell<UartPeripheral>>> = core_int::Mutex<RefCell<uart_c>>;
-
     // downstream sensor pod UART peripheral
-    let mut uart_s = UartPeripheral::new(periphs.UART0, s_uart_pins, &mut periphs.RESETS)
+    let uart_s = UartPeripheral::new(periphs.UART0, s_uart_pins, &mut periphs.RESETS)
         .enable(uart::common_configs::_115200_8_N_1, uart_clocks)
         .unwrap();
 
     //    cortex_m::interrupt::free(|cs| UART_C.borrow(cs).replace(Some(uart_c)));
-
+ 
     let i2c = I2C::i2c0(
         periphs.I2C0,
         pins.gpio20.into_mode(), // sda
@@ -144,7 +142,7 @@ fn main() -> ! {
     );
 
     let mut adx = Adxl343::new(i2c).unwrap();
-    // adx.write_register(adxl343::register::Register::INT_ENABLE, 1);
+    adx.write_register(adxl343::Register::INT_ENABLE, 1).unwrap();
 
     handler!(
         u0 = move || {
@@ -152,21 +150,26 @@ fn main() -> ! {
             let _bytes_read = uart_s.read_raw(&mut buffer);
 
             if _bytes_read.is_ok() {
-                let s: &str = core::str::from_utf8(&buffer).unwrap();
-                uart_c.write_str(&s).unwrap();
+                unsafe {
+                    let s: &str = core::str::from_utf8(&buffer).unwrap();
+                    cortex_m::interrupt::free(|cs| MSG_Q.borrow(cs).borrow_mut().push(s.to_string()));
+                }
             }
         }
     );
 
-    // handler!(
-    //     gp0 = move || {
-    //         uart_c.write_str("{id:1, alert: \"Motion Detected\"").unwrap();
-    //     }
-    // );
+    handler!(
+        gp0 = move || {
+            unsafe {
+                let s: &str = "{id:1, alert:\"Motion Detected.\"}";
+                cortex_m::interrupt::free(|cs| MSG_Q.borrow(cs).borrow_mut().push(s.to_string()));
+            }
+        }
+    );
 
     scope(|scope| {
         scope.register(Interrupt::UART0_IRQ, u0);
-        // scope.register(Interrupt::IO_IRQ_BANK0, gp0);
+        scope.register(Interrupt::IO_IRQ_BANK0, gp0);
 
         loop {
             led_pin.set_high().unwrap();
@@ -181,14 +184,15 @@ fn main() -> ! {
             )
             .unwrap();
 
-            // let mut buffer = [0u8; 64];
-            // let _bytes_read = uart_s.read_raw(&mut buffer);
+            unsafe {
+                cortex_m::interrupt::free(|cs| {
+                    let mut messages: Vec<String> = MSG_Q.borrow(cs).borrow_mut().to_vec();
 
-            // if _bytes_read.is_ok() {
-            //     let s: &str = core::str::from_utf8(&buffer).unwrap();
-            //     uart_c.write_str(&s).unwrap();
-            // }
-
+                    while let Some(msg) = messages.pop() {
+                        uart_c.write_str(msg.as_str()).unwrap();
+                    }
+                });
+            }
         }
     })
 }

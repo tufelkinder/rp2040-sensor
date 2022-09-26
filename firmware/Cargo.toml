@@ -17,7 +17,7 @@ defmt-rtt = "0.3.0"
 panic-probe = { version = "0.3.0", features = ["print-defmt"] }
 # lis3dh = "0.4.2"
 # lis2dh12 = "0.6.7"
-adxl343 = "0.8.0"
+adxl343 = { version = "0.8.0", git = "https://github.com/tufelkinder/ADXL343.rs" }
 accelerometer = "0.12.0"
 heapless =  "0.7.10"
 irq = "0.2.3"
