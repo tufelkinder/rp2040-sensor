@@ -36,7 +36,7 @@ use rp2040_hal::{
     watchdog::Watchdog,
 };
 
-use crate::pac::UART1;
+// use crate::pac::UART1;
 
 #[link_section = ".boot_loader"]
 #[used]
@@ -54,7 +54,7 @@ scoped_interrupts! {
 #[global_allocator]
 static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
 
-type UART = UartPeripheral<Enabled, UART1, (Pin<Gpio4, Function<Uart>>, Pin<Gpio5, Function<Uart>>)>;
+// type UART = UartPeripheral<Enabled, UART1, (Pin<Gpio4, Function<Uart>>, Pin<Gpio5, Function<Uart>>)>;
 
 static mut MSG_Q: Mutex<RefCell<Vec<String>>> = Mutex::new(RefCell::new(Vec::new()));
 
