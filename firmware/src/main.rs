@@ -7,11 +7,15 @@ extern crate alloc;
 use alloc::string::{String, ToString};
 use alloc_cortex_m::CortexMHeap;
 use alloc::vec::Vec;
+use alloc::format;
 use core::alloc::Layout;
+use core::borrow::BorrowMut;
+use core::fmt::Write;
+use core::ops::DerefMut;
 
 use adxl343::{accelerometer::Accelerometer, Adxl343};  // , register::Register
 use core::cell::RefCell;
-use core::fmt::Write;
+// use core::fmt::Write;
 // use core::time::Duration;
 use cortex_m::interrupt::Mutex;
 use cortex_m_rt::entry;
@@ -22,15 +26,15 @@ use embedded_time::rate::Extensions;
 use embedded_time::{fixed_point::FixedPoint};
 use panic_probe as _;
 // use heapless::Vec;
-use irq::{handler, scope, scoped_interrupts};
+// use irq::{handler, scope, scoped_interrupts};
 
 use rp2040_hal::{
     clocks::{init_clocks_and_plls, Clock},
     gpio,
-    gpio::{bank0::{Gpio4, Gpio5}, Function, FunctionUart, Pin, Uart}, // , Interrupt, Pin, rp2040_hal::gpio::bank0::Gpio5;
+    gpio::{bank0::{Gpio4, Gpio5, Gpio16, Gpio17}, Function, FunctionUart, Pin, Uart}, // , Interrupt, Pin, rp2040_hal::gpio::bank0::Gpio5;
     i2c::I2C,
     pac,
-    pac::interrupt,
+    pac::{interrupt, UART0, UART1},
     sio::Sio,
     uart::{self, Enabled, UartPeripheral},
     watchdog::Watchdog,
@@ -42,21 +46,25 @@ use rp2040_hal::{
 #[used]
 pub static BOOT_LOADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
-scoped_interrupts! {
-    enum Interrupt {
-        UART0_IRQ,
-        IO_IRQ_BANK0
-    }
+// scoped_interrupts! {
+//     enum Interrupt {
+//         UART0_IRQ,
+//         IO_IRQ_BANK0
+//     }
 
-    use #[interrupt];
-}
+//     use #[interrupt];
+// }
 
 #[global_allocator]
 static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
 
-// type UART = UartPeripheral<Enabled, UART1, (Pin<Gpio4, Function<Uart>>, Pin<Gpio5, Function<Uart>>)>;
+type TUartC = UartPeripheral<Enabled, UART1, (Pin<Gpio4, Function<Uart>>, Pin<Gpio5, Function<Uart>>)>;
+type TUartS = UartPeripheral<Enabled, UART0, (Pin<Gpio16, Function<Uart>>, Pin<Gpio17, Function<Uart>>)>;
 
 static mut MSG_Q: Mutex<RefCell<Vec<String>>> = Mutex::new(RefCell::new(Vec::new()));
+
+static mut UART_C: Mutex<RefCell<Option<TUartC>>> = Mutex::new(RefCell::new(None));
+static mut UART_S: Mutex<RefCell<Option<TUartS>>> = Mutex::new(RefCell::new(None));
 
 #[entry]
 fn main() -> ! {
@@ -126,12 +134,17 @@ fn main() -> ! {
         .unwrap();
 
     // downstream sensor pod UART peripheral
-    let uart_s = UartPeripheral::new(periphs.UART0, s_uart_pins, &mut periphs.RESETS)
+    let mut uart_s = UartPeripheral::new(periphs.UART0, s_uart_pins, &mut periphs.RESETS)
         .enable(uart::common_configs::_115200_8_N_1, uart_clocks)
         .unwrap();
 
     //    cortex_m::interrupt::free(|cs| UART_C.borrow(cs).replace(Some(uart_c)));
  
+    unsafe {
+        cortex_m::interrupt::free(|cs| UART_C.borrow(cs).replace(Some(uart_c)));
+        cortex_m::interrupt::free(|cs| UART_S.borrow(cs).replace(Some(uart_s)));
+    }
+    
     let i2c = I2C::i2c0(
         periphs.I2C0,
         pins.gpio20.into_mode(), // sda
@@ -144,67 +157,57 @@ fn main() -> ! {
     let mut adx = Adxl343::new(i2c).unwrap();
     adx.write_register(adxl343::Register::INT_ENABLE, 1).unwrap();
 
-    handler!(
-        u0 = move || {
-            let mut buffer = [0u8; 64];
-            let _bytes_read = uart_s.read_raw(&mut buffer);
+    #[interrupt]
+    fn UART0_IRQ() {
+        let mut buffer = [0u8; 64];
 
+        unsafe {
+            let _bytes_read = cortex_m::interrupt::free(|cs| {
+                let u_s = UART_S.borrow(cs).borrow();
+                u_s.as_ref().unwrap().read_raw(&mut buffer)
+            });
+            
             if _bytes_read.is_ok() {
-                unsafe {
-                    let s: &str = core::str::from_utf8(&buffer).unwrap();
-                    cortex_m::interrupt::free(|cs| MSG_Q.borrow(cs).borrow_mut().push(s.to_string()));
-                }
+                cortex_m::interrupt::free(|cs| {
+                    if let Some(ref mut u_c) =  UART_C.borrow(cs).borrow_mut().deref_mut() {
+                        let s: &str = core::str::from_utf8(&buffer).unwrap();
+                        u_c.write_str(s);
+                    }
+                });
             }
         }
-    );
+    }
 
-    handler!(
-        gp0 = move || {
-            unsafe {
-                let s: &str = "{id:1, alert:\"Motion Detected.\"}";
-                cortex_m::interrupt::free(|cs| MSG_Q.borrow(cs).borrow_mut().push(s.to_string()));
-            }
+    #[interrupt]
+    fn IO_IRQ_BANK0 () {
+        unsafe {
+            let s: &str = "{id:1, alert:\"Motion Detected.\"}";
+            cortex_m::interrupt::free(|cs| MSG_Q.borrow(cs).borrow_mut().push(s.to_string()));
         }
-    );
+    }
 
-    scope(|scope| {
-        scope.register(Interrupt::UART0_IRQ, u0);
-        scope.register(Interrupt::IO_IRQ_BANK0, gp0);
-
-        loop {
+    loop {
+        unsafe {
             led_pin.set_high().unwrap();
             delay.delay_ms(500);
             led_pin.set_low().unwrap();
             delay.delay_ms(500);
             let acc_data = adx.accel_norm().unwrap();
-            writeln!(
-                uart_c,
-                "{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r",
-                acc_data.x, acc_data.y, acc_data.z
-            )
-            .unwrap();
 
-            unsafe {
-                cortex_m::interrupt::free(|cs| {
-                    let mut messages: Vec<String> = MSG_Q.borrow(cs).borrow_mut().to_vec();
-
-                    while let Some(msg) = messages.pop() {
-                        uart_c.write_str(msg.as_str()).unwrap();
-                    }
-                });
-            }
+            cortex_m::interrupt::free(|cs| {
+                if let Some(ref mut u_c) =  UART_C.borrow(cs).borrow_mut().deref_mut() {
+                    let msg = format!("{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r", acc_data.x, acc_data.y, acc_data.z);
+                    u_c.write_str(&msg.as_str());
+                }
+            });
         }
-    })
+    }
+    // })
 }
 
 #[alloc_error_handler]
 fn oom(_: Layout) -> ! {
     loop {}
 }
-
-// #[panic_handler]
-// fn panic(_: &PanicInfo) -> ! {
-//     loop {}
-// }
 
 // End of file
