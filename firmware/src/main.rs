@@ -9,7 +9,7 @@ use alloc_cortex_m::CortexMHeap;
 use alloc::vec::Vec;
 use alloc::format;
 use core::alloc::Layout;
-use core::borrow::BorrowMut;
+// use core::borrow::BorrowMut;
 use core::fmt::Write;
 use core::ops::DerefMut;
 
@@ -141,10 +141,10 @@ fn main() -> ! {
     //    cortex_m::interrupt::free(|cs| UART_C.borrow(cs).replace(Some(uart_c)));
  
     unsafe {
-        cortex_m::interrupt::free(|cs| UART_C.borrow(cs).replace(Some(uart_c)));
+        // cortex_m::interrupt::free(|cs| UART_C.borrow(cs).replace(Some(uart_c)));
         cortex_m::interrupt::free(|cs| UART_S.borrow(cs).replace(Some(uart_s)));
     }
-    
+
     let i2c = I2C::i2c0(
         periphs.I2C0,
         pins.gpio20.into_mode(), // sda
@@ -166,13 +166,16 @@ fn main() -> ! {
                 let u_s = UART_S.borrow(cs).borrow();
                 u_s.as_ref().unwrap().read_raw(&mut buffer)
             });
-            
+
             if _bytes_read.is_ok() {
+                let s: &str = core::str::from_utf8(&buffer).unwrap();
                 cortex_m::interrupt::free(|cs| {
-                    if let Some(ref mut u_c) =  UART_C.borrow(cs).borrow_mut().deref_mut() {
-                        let s: &str = core::str::from_utf8(&buffer).unwrap();
-                        u_c.write_str(s);
-                    }
+                    MSG_Q.borrow(cs).borrow_mut().push(s.to_string());
+
+                    // if let Some(ref mut u_c) =  UART_C.borrow(cs).borrow_mut().deref_mut() {
+                    //     let s: &str = core::str::from_utf8(&buffer).unwrap();
+                    //     u_c.write_str(format!("{}{}", s, "\n").as_str()).unwrap();
+                    // }
                 });
             }
         }
@@ -181,8 +184,15 @@ fn main() -> ! {
     #[interrupt]
     fn IO_IRQ_BANK0 () {
         unsafe {
-            let s: &str = "{id:1, alert:\"Motion Detected.\"}";
-            cortex_m::interrupt::free(|cs| MSG_Q.borrow(cs).borrow_mut().push(s.to_string()));
+            cortex_m::interrupt::free(|cs| {
+                let s: &str = "{id:1, alert:\"Motion Detected.\"}\n";
+                MSG_Q.borrow(cs).borrow_mut().push(s.to_string());
+
+                // if let Some(ref mut u_c) =  UART_C.borrow(cs).borrow_mut().deref_mut() {
+                //     let s: &str = "{id:1, alert:\"Motion Detected.\"}\n";
+                //     u_c.write_str(format!("{}{}", s, "\n").as_str()).unwrap();
+                // }
+            });
         }
     }
 
@@ -194,11 +204,22 @@ fn main() -> ! {
             delay.delay_ms(500);
             let acc_data = adx.accel_norm().unwrap();
 
+            let cur_data = format!("{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r\n", acc_data.x, acc_data.y, acc_data.z);
+            uart_c.write_str(cur_data.as_str()).unwrap();
+
             cortex_m::interrupt::free(|cs| {
-                if let Some(ref mut u_c) =  UART_C.borrow(cs).borrow_mut().deref_mut() {
-                    let msg = format!("{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r", acc_data.x, acc_data.y, acc_data.z);
-                    u_c.write_str(&msg.as_str());
+                let mut messages: Vec<String> = MSG_Q.borrow(cs).borrow_mut().to_vec();
+                uart_c.write_str(messages.len().to_string().as_str()).unwrap();
+
+                while let Some(msg) = messages.pop() {
+                    let cur_data = format!("{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r\n", acc_data.x, acc_data.y, acc_data.z);
+                    uart_c.write_str(msg.as_str()).unwrap();
                 }
+
+                // if let Some(ref mut u_c) =  UART_C.borrow(cs).borrow_mut().deref_mut() {
+                //     let msg = format!("{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r\n", acc_data.x, acc_data.y, acc_data.z);
+                //     u_c.write_str(&msg.as_str()).unwrap();
+                // }
             });
         }
     }
