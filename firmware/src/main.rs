@@ -125,7 +125,7 @@ fn main() -> ! {
         pins.gpio16.into_mode::<FunctionUart>(),
         pins.gpio17.into_mode::<FunctionUart>(),
     );
-    
+
     let uart_clocks = clocks.peripheral_clock.into();
     
     // main controller UART peripheral
@@ -138,6 +138,7 @@ fn main() -> ! {
         .enable(uart::common_configs::_115200_8_N_1, uart_clocks)
         .unwrap();
 
+    uart_s.enable_rx_interrupt();
     //    cortex_m::interrupt::free(|cs| UART_C.borrow(cs).replace(Some(uart_c)));
  
     unsafe {
@@ -167,7 +168,7 @@ fn main() -> ! {
                 u_s.as_ref().unwrap().read_raw(&mut buffer)
             });
 
-            if _bytes_read.is_ok() {
+            // if _bytes_read.is_ok() {
                 let s: &str = core::str::from_utf8(&buffer).unwrap();
                 cortex_m::interrupt::free(|cs| {
                     MSG_Q.borrow(cs).borrow_mut().push(s.to_string());
@@ -177,7 +178,7 @@ fn main() -> ! {
                     //     u_c.write_str(format!("{}{}", s, "\n").as_str()).unwrap();
                     // }
                 });
-            }
+            // }
         }
     }
 
@@ -204,7 +205,7 @@ fn main() -> ! {
             delay.delay_ms(500);
             let acc_data = adx.accel_norm().unwrap();
 
-            let cur_data = format!("{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r\n", acc_data.x, acc_data.y, acc_data.z);
+            let cur_data = format!("{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\n", acc_data.x, acc_data.y, acc_data.z);
             uart_c.write_str(cur_data.as_str()).unwrap();
 
             cortex_m::interrupt::free(|cs| {
@@ -212,7 +213,7 @@ fn main() -> ! {
                 uart_c.write_str(messages.len().to_string().as_str()).unwrap();
 
                 while let Some(msg) = messages.pop() {
-                    let cur_data = format!("{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r\n", acc_data.x, acc_data.y, acc_data.z);
+                    let cur_data = format!("{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\n", acc_data.x, acc_data.y, acc_data.z);
                     uart_c.write_str(msg.as_str()).unwrap();
                 }
 
