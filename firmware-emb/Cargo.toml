@@ -1,8 +1,9 @@
 [package]
-name = "firmware-emb"
-version = "0.1.0"
 edition = "2021"
+name = "sensor-fw-emb"
+version = "0.1.0"
 license = "MIT OR Apache-2.0"
+
 
 [dependencies]
 embassy-sync = { version = "0.1.0", path = "../../embassy/embassy-sync", features = ["defmt"] }

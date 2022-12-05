@@ -525,37 +525,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a357d28ed41a50f9c765dbfe56cbc04a64e53e5fc58ba79fbc34c10ef3df831f"
 
 [[package]]
-name = "firmware-emb"
-version = "0.1.0"
-dependencies = [
- "byte-slice-cast 1.2.2",
- "cortex-m",
- "cortex-m-rt",
- "defmt",
- "defmt-rtt",
- "display-interface",
- "display-interface-spi",
- "embassy-executor",
- "embassy-futures",
- "embassy-net",
- "embassy-rp",
- "embassy-sync",
- "embassy-time",
- "embassy-usb",
- "embassy-usb-logger",
- "embedded-graphics",
- "embedded-hal 1.0.0-alpha.9",
- "embedded-hal-async",
- "embedded-io",
- "embedded-storage",
- "futures",
- "log",
- "panic-probe",
- "st7789",
- "static_cell",
-]
-
-[[package]]
 name = "float-cmp"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -889,6 +858,37 @@ name = "semver-parser"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
+
+[[package]]
+name = "sensor-fw-emb"
+version = "0.1.0"
+dependencies = [
+ "byte-slice-cast 1.2.2",
+ "cortex-m",
+ "cortex-m-rt",
+ "defmt",
+ "defmt-rtt",
+ "display-interface",
+ "display-interface-spi",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-net",
+ "embassy-rp",
+ "embassy-sync",
+ "embassy-time",
+ "embassy-usb",
+ "embassy-usb-logger",
+ "embedded-graphics",
+ "embedded-hal 1.0.0-alpha.9",
+ "embedded-hal-async",
+ "embedded-io",
+ "embedded-storage",
+ "futures",
+ "log",
+ "panic-probe",
+ "st7789",
+ "static_cell",
+]
 
 [[package]]
 name = "serde"
