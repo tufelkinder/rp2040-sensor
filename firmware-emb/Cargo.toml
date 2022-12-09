@@ -20,6 +20,7 @@ defmt-rtt = "0.4"
 
 cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7.0"
+alloc-cortex-m = "0.4.2"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 futures = { version = "0.3.17", default-features = false, features = ["async-await", "cfg-target-has-atomic", "unstable"] }
 display-interface-spi = "0.4.1"
@@ -27,6 +28,9 @@ embedded-graphics = "0.7.1"
 st7789 = "0.6.1"
 display-interface = "0.4.1"
 byte-slice-cast = { version = "1.2.0", default-features = false }
+
+adxl343 = { version = "0.8.0", git = "https://github.com/tufelkinder/ADXL343.rs" }
+accelerometer = "0.12.0"
 
 embedded-hal-1 = { package = "embedded-hal", version = "=1.0.0-alpha.9" }
 embedded-hal-async = "0.2.0-alpha.0"

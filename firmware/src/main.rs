@@ -46,15 +46,6 @@ use rp2040_hal::{
 #[used]
 pub static BOOT_LOADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
 
-// scoped_interrupts! {
-//     enum Interrupt {
-//         UART0_IRQ,
-//         IO_IRQ_BANK0
-//     }
-
-//     use #[interrupt];
-// }
-
 #[global_allocator]
 static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
 
@@ -138,13 +129,7 @@ fn main() -> ! {
         .enable(uart::common_configs::_115200_8_N_1, uart_clocks)
         .unwrap();
 
-    uart_s.enable_rx_interrupt();
-    //    cortex_m::interrupt::free(|cs| UART_C.borrow(cs).replace(Some(uart_c)));
- 
-    unsafe {
-        // cortex_m::interrupt::free(|cs| UART_C.borrow(cs).replace(Some(uart_c)));
-        cortex_m::interrupt::free(|cs| UART_S.borrow(cs).replace(Some(uart_s)));
-    }
+    // uart_s.enable_rx_interrupt();
 
     let i2c = I2C::i2c0(
         periphs.I2C0,
@@ -157,6 +142,8 @@ fn main() -> ! {
 
     let mut adx = Adxl343::new(i2c).unwrap();
     adx.write_register(adxl343::Register::INT_ENABLE, 1).unwrap();
+    adx.write_register(adxl343::Register::THRESH_ACT, 1).unwrap();
+    adx.write_register(adxl343::Register::ACT_INACT_CTL, 119).unwrap();
 
     #[interrupt]
     fn UART0_IRQ() {
@@ -168,17 +155,12 @@ fn main() -> ! {
                 u_s.as_ref().unwrap().read_raw(&mut buffer)
             });
 
-            // if _bytes_read.is_ok() {
+            if _bytes_read.is_ok() {
                 let s: &str = core::str::from_utf8(&buffer).unwrap();
                 cortex_m::interrupt::free(|cs| {
                     MSG_Q.borrow(cs).borrow_mut().push(s.to_string());
-
-                    // if let Some(ref mut u_c) =  UART_C.borrow(cs).borrow_mut().deref_mut() {
-                    //     let s: &str = core::str::from_utf8(&buffer).unwrap();
-                    //     u_c.write_str(format!("{}{}", s, "\n").as_str()).unwrap();
-                    // }
                 });
-            // }
+            }
         }
     }
 
@@ -188,43 +170,28 @@ fn main() -> ! {
             cortex_m::interrupt::free(|cs| {
                 let s: &str = "{id:1, alert:\"Motion Detected.\"}\n";
                 MSG_Q.borrow(cs).borrow_mut().push(s.to_string());
-
-                // if let Some(ref mut u_c) =  UART_C.borrow(cs).borrow_mut().deref_mut() {
-                //     let s: &str = "{id:1, alert:\"Motion Detected.\"}\n";
-                //     u_c.write_str(format!("{}{}", s, "\n").as_str()).unwrap();
-                // }
             });
         }
     }
 
     loop {
-        unsafe {
-            led_pin.set_high().unwrap();
-            delay.delay_ms(500);
-            led_pin.set_low().unwrap();
-            delay.delay_ms(500);
-            let acc_data = adx.accel_norm().unwrap();
+        led_pin.set_high().unwrap();
+        delay.delay_ms(500);
+        let acc_data = adx.accel_norm().unwrap();
+        let cur_data = format!("{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r\n", acc_data.x, acc_data.y, acc_data.z);
+        uart_c.write_str(cur_data.as_str()).unwrap();
 
-            let cur_data = format!("{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\n", acc_data.x, acc_data.y, acc_data.z);
-            uart_c.write_str(cur_data.as_str()).unwrap();
+        let mut buffer = [0u8; 64];
+        
+        let _bytes_read =  uart_s.read_raw(&mut buffer);
 
-            cortex_m::interrupt::free(|cs| {
-                let mut messages: Vec<String> = MSG_Q.borrow(cs).borrow_mut().to_vec();
-                uart_c.write_str(messages.len().to_string().as_str()).unwrap();
-
-                while let Some(msg) = messages.pop() {
-                    let cur_data = format!("{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\n", acc_data.x, acc_data.y, acc_data.z);
-                    uart_c.write_str(msg.as_str()).unwrap();
-                }
-
-                // if let Some(ref mut u_c) =  UART_C.borrow(cs).borrow_mut().deref_mut() {
-                //     let msg = format!("{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r\n", acc_data.x, acc_data.y, acc_data.z);
-                //     u_c.write_str(&msg.as_str()).unwrap();
-                // }
-            });
+        if _bytes_read.is_ok() {
+            let s: &str = core::str::from_utf8(&buffer).unwrap();
+            uart_c.write_str(&s).unwrap();
         }
+        led_pin.set_low().unwrap();
+        delay.delay_ms(500);
     }
-    // })
 }
 
 #[alloc_error_handler]
