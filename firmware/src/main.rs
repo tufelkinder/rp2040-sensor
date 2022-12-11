@@ -11,9 +11,9 @@ use alloc::format;
 use core::alloc::Layout;
 // use core::borrow::BorrowMut;
 use core::fmt::Write;
-use core::ops::DerefMut;
+// use core::ops::DerefMut;
 
-use adxl343::{accelerometer::Accelerometer, Adxl343};  // , register::Register
+use adxl343::{Adxl343, accelerometer::Accelerometer};  // , register::Register
 use core::cell::RefCell;
 // use core::fmt::Write;
 // use core::time::Duration;
@@ -21,9 +21,10 @@ use cortex_m::interrupt::Mutex;
 use cortex_m_rt::entry;
 // use defmt::*;
 use defmt_rtt as _;
-use embedded_hal::digital::v2::OutputPin;
-use embedded_time::rate::Extensions;
-use embedded_time::{fixed_point::FixedPoint};
+use embedded_hal::digital::v2::{InputPin, OutputPin};
+//use embedded_time::rate::Extensions;
+//use embedded_time::{fixed_point::FixedPoint};
+use fugit::RateExtU32;
 use panic_probe as _;
 // use heapless::Vec;
 // use irq::{handler, scope, scoped_interrupts};
@@ -85,7 +86,7 @@ fn main() -> ! {
     .ok()
     .unwrap();
 
-    let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().integer());
+    let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
 
     let pins = rp2040_hal::gpio::Pins::new(
         periphs.IO_BANK0,
@@ -117,7 +118,7 @@ fn main() -> ! {
         pins.gpio17.into_mode::<FunctionUart>(),
     );
 
-    let uart_clocks = clocks.peripheral_clock.into();
+    let uart_clocks = clocks.peripheral_clock.freq();
     
     // main controller UART peripheral
     let mut uart_c = UartPeripheral::new(periphs.UART1, c_uart_pins, &mut periphs.RESETS)
@@ -174,24 +175,23 @@ fn main() -> ! {
         }
     }
 
+    unsafe {
+        pac::NVIC::unmask(pac::Interrupt::IO_IRQ_BANK0);
+    }
+
     loop {
+        // interrupts handle everything else in this example.
         led_pin.set_high().unwrap();
         delay.delay_ms(500);
         let acc_data = adx.accel_norm().unwrap();
         let cur_data = format!("{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r\n", acc_data.x, acc_data.y, acc_data.z);
         uart_c.write_str(cur_data.as_str()).unwrap();
 
-        let mut buffer = [0u8; 64];
-        
-        let _bytes_read =  uart_s.read_raw(&mut buffer);
-
-        if _bytes_read.is_ok() {
-            let s: &str = core::str::from_utf8(&buffer).unwrap();
-            uart_c.write_str(&s).unwrap();
-        }
         led_pin.set_low().unwrap();
         delay.delay_ms(500);
+        cortex_m::asm::wfi();
     }
+
 }
 
 #[alloc_error_handler]

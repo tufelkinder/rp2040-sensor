@@ -1,63 +1,26 @@
-from machine import UART, Pin
-from time import sleep
+import machine
 import uasyncio as asyncio
+import utime
+import queue
+import json
+from machine import UART, Pin
 
+uart_c = UART(1, baudrate=115200, tx=Pin(4), rx=Pin(5))
+uart_s = UART(0, baudrate=115200, tx=Pin(16), rx=Pin(17))
 
-class GSM():
-    def __init__(self):
-        self.uart = UART(1, 115200, tx=Pin(8), rx=Pin(9))
-        self.swriter = asyncio.StreamWriter(self.uart, {})
-        self.sreader = asyncio.StreamReader(self.uart)
+# Settings
+led1 = machine.Pin(9, machine.Pin.OUT)
+led2 = machine.Pin(10, machine.Pin.OUT)
 
-    async def sender(self, msg):
-        await self.swriter.awrite(msg)
+# setup:
+# set adxl thresholds and activate
 
-    async def flush(self):
-        res = ""
-        try:
-            while "OK" not in res:
-                res = await self.sreader.readline()
-                print('Recieved:', res)
-        except asyncio.TimeoutError:
-            print("Timeout: ERROR in response")
-        finally:
-            print("Exiting")
+# task 1
+# listen for adxl interrupts and report via uart_c
 
-    async def receiver(self):
-        res = ""
-        ret = []
-        try:
-            while "OK" not in res:
-                res = await self.sreader.readline()
-                ret.append(res)
-        except asyncio.TimeoutError:
-            print("Timeout: Error in response")
-            return []
-        finally:
-            print("Exiting")
-            return ret
+# task 2
+# listen for uart_s interrupts, read, increment id, and report via uart_c
 
+# task 3
+# listen for uart_c incoming messages, update and pass along thresholds accordingly
 
-    def send_and_flush(self, msg):
-        asyncio.run(self.sender(msg))
-        asyncio.run(self.flush())
-
-    def send_and_rec(self, msg):
-        asyncio.run(self.sender(msg))
-        ret = asyncio.run(self.receiver())
-        return ret
-
-    def auth_sender(self, msg_list):
-        try:
-            return self.number == res[1].decode("utf-8").replace('"','').split(",")[2]
-        except:
-            return -1
-
-
-gsm = GSM()
-gsm.send_and_flush('AT+CPMS="SM"\r\n')
-
-gsm.send_and_flush('AT+CMGF=1\r\n')
-
-res = gsm.send_and_rec('AT+CMGL="ALL"\r\n')
-print(res)
