@@ -37,7 +37,7 @@ use rp2040_hal::{
     pac,
     pac::{interrupt, UART0, UART1},
     sio::Sio,
-    uart::{self, Enabled, UartPeripheral},
+    uart::{self, Enabled, DataBits, StopBits, UartConfig, UartPeripheral},
     watchdog::Watchdog,
 };
 
@@ -52,9 +52,12 @@ static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
 
 type TUartC = UartPeripheral<Enabled, UART1, (Pin<Gpio4, Function<Uart>>, Pin<Gpio5, Function<Uart>>)>;
 type TUartS = UartPeripheral<Enabled, UART0, (Pin<Gpio16, Function<Uart>>, Pin<Gpio17, Function<Uart>>)>;
+type LedPin1 = gpio::Pin<gpio::bank0::Gpio9, gpio::PushPullOutput>;
+type LedPin2 = gpio::Pin<gpio::bank0::Gpio10, gpio::PushPullOutput>;
 
 static mut MSG_Q: Mutex<RefCell<Vec<String>>> = Mutex::new(RefCell::new(Vec::new()));
-
+static LED1: Mutex<RefCell<Option<LedPin1>>> = Mutex::new(RefCell::new(None));
+static LED2: Mutex<RefCell<Option<LedPin2>>> = Mutex::new(RefCell::new(None));
 static mut UART_C: Mutex<RefCell<Option<TUartC>>> = Mutex::new(RefCell::new(None));
 static mut UART_S: Mutex<RefCell<Option<TUartS>>> = Mutex::new(RefCell::new(None));
 
@@ -97,8 +100,11 @@ fn main() -> ! {
 
     // let mut led_pin = pins.gpio0.into_push_pull_output();
     // let mut led_pin2 = pins.gpio25.into_push_pull_output();
-    let mut led_pin = pins.gpio9.into_push_pull_output();
+    // let mut led_pin = pins.gpio9.into_push_pull_output();
     // let mut led_pin2 = pins.gpio10.into_push_pull_output();
+
+    let led1 = pins.gpio9.into_mode();
+    let led2 = pins.gpio10.into_mode();
 
     let adxl_int_pin1 = pins.gpio19.into_pull_down_input();
     let adxl_int_pin2 = pins.gpio18.into_pull_down_input();
@@ -122,15 +128,25 @@ fn main() -> ! {
     
     // main controller UART peripheral
     let mut uart_c = UartPeripheral::new(periphs.UART1, c_uart_pins, &mut periphs.RESETS)
+//        .enable(UartConfig::new(115200.Hz(), DataBits::Eight, None, StopBits::One), uart_clocks)
         .enable(uart::common_configs::_115200_8_N_1, uart_clocks)
         .unwrap();
 
     // downstream sensor pod UART peripheral
     let mut uart_s = UartPeripheral::new(periphs.UART0, s_uart_pins, &mut periphs.RESETS)
+//        .enable(UartConfig::new(115200.Hz(), DataBits::Eight, None, StopBits::One), uart_clocks)
         .enable(uart::common_configs::_115200_8_N_1, uart_clocks)
         .unwrap();
 
-    // uart_s.enable_rx_interrupt();
+    uart_c.enable_rx_interrupt();
+    uart_s.enable_rx_interrupt();
+
+    unsafe {
+        cortex_m::interrupt::free(|cs| UART_C.borrow(cs).replace(Some(uart_c)));
+        cortex_m::interrupt::free(|cs| UART_S.borrow(cs).replace(Some(uart_s)));
+        cortex_m::interrupt::free(|cs| LED1.borrow(cs).replace(Some(led1)));
+        cortex_m::interrupt::free(|cs| LED2.borrow(cs).replace(Some(led2)));
+    }
 
     let i2c = I2C::i2c0(
         periphs.I2C0,
@@ -146,52 +162,71 @@ fn main() -> ! {
     adx.write_register(adxl343::Register::THRESH_ACT, 1).unwrap();
     adx.write_register(adxl343::Register::ACT_INACT_CTL, 119).unwrap();
 
-    #[interrupt]
-    fn UART0_IRQ() {
-        let mut buffer = [0u8; 64];
-
-        unsafe {
-            let _bytes_read = cortex_m::interrupt::free(|cs| {
-                let u_s = UART_S.borrow(cs).borrow();
-                u_s.as_ref().unwrap().read_raw(&mut buffer)
-            });
-
-            if _bytes_read.is_ok() {
-                let s: &str = core::str::from_utf8(&buffer).unwrap();
-                cortex_m::interrupt::free(|cs| {
-                    MSG_Q.borrow(cs).borrow_mut().push(s.to_string());
-                });
-            }
-        }
-    }
-
-    #[interrupt]
-    fn IO_IRQ_BANK0 () {
-        unsafe {
-            cortex_m::interrupt::free(|cs| {
-                let s: &str = "{id:1, alert:\"Motion Detected.\"}\n";
-                MSG_Q.borrow(cs).borrow_mut().push(s.to_string());
-            });
-        }
-    }
-
     unsafe {
         pac::NVIC::unmask(pac::Interrupt::IO_IRQ_BANK0);
+        pac::NVIC::unmask(pac::Interrupt::UART0_IRQ);
+        pac::NVIC::unmask(pac::Interrupt::UART1_IRQ);
     }
 
     loop {
         // interrupts handle everything else in this example.
-        led_pin.set_high().unwrap();
-        delay.delay_ms(500);
-        let acc_data = adx.accel_norm().unwrap();
-        let cur_data = format!("{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r\n", acc_data.x, acc_data.y, acc_data.z);
-        uart_c.write_str(cur_data.as_str()).unwrap();
-
-        led_pin.set_low().unwrap();
-        delay.delay_ms(500);
+        // led_pin.set_high().unwrap();
+        // delay.delay_ms(500);
+        // led_pin.set_low().unwrap();
+        // delay.delay_ms(500);
         cortex_m::asm::wfi();
     }
 
+}
+
+#[interrupt]
+fn UART0_IRQ() {  // upstream sensor comms
+    let mut buffer = [0u8; 64];
+
+    unsafe {
+        let _bytes_read = cortex_m::interrupt::free(|cs| {
+            let u_s = UART_S.borrow(cs).borrow();
+            u_s.as_ref().unwrap().read_raw(&mut buffer)
+        });
+
+        if _bytes_read.is_ok() {
+            let s: &str = core::str::from_utf8(&buffer).unwrap();
+            cortex_m::interrupt::free(|cs| {
+                UART_C.borrow(cs).take().expect("No UART obj found!").write_str(s).unwrap();
+            });
+        }
+    }
+}
+
+#[interrupt]
+fn UART1_IRQ() {
+    let mut buffer = [0u8; 64];
+
+    unsafe {
+        let _bytes_read = cortex_m::interrupt::free(|cs| {
+            let u_s = UART_S.borrow(cs).borrow();
+            u_s.as_ref().unwrap().read_raw(&mut buffer)
+        });
+
+        if _bytes_read.is_ok() {
+            let s: &str = core::str::from_utf8(&buffer).unwrap();
+            cortex_m::interrupt::free(|cs| {
+                UART_C.borrow(cs).take().expect("No UART obj found!").write_str(s).unwrap();
+            });
+        }
+    }
+}
+
+#[interrupt]
+fn IO_IRQ_BANK0 () {
+    unsafe {
+        cortex_m::interrupt::free(|cs| {
+            let s: &str = "{id:1, alert:\"Motion Detected.\"}\r\n";
+            cortex_m::interrupt::free(|cs| {
+                UART_C.borrow(cs).take().expect("No UART obj found!").write_str(s).unwrap();
+            });
+        });
+    }
 }
 
 #[alloc_error_handler]

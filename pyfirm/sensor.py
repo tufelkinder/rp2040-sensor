@@ -4,6 +4,10 @@ import utime
 import queue
 import json
 from machine import UART, Pin
+from adxl345 import ADXL345
+
+
+adxl345 = ADXL345()
 
 uart_c = UART(1, baudrate=115200, tx=Pin(4), rx=Pin(5))
 uart_s = UART(0, baudrate=115200, tx=Pin(16), rx=Pin(17))
