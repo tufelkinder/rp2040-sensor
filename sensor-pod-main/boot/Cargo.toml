@@ -1,0 +1,42 @@
+[package]
+edition = "2021"
+name = "sensor-pod-bootloader"
+version = "0.1.0"
+description = "Example bootloader for RP2040 chips"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+defmt = { version = "0.3", optional = true }
+defmt-rtt = { version = "0.4", optional = true }
+
+embassy-rp = { version = "0.1.0", default-features = false, features = ["nightly", "critical-section-impl"] }
+embassy-boot-rp = { version = "0.1.0", default-features = false }
+embassy-time = { version = "0.1.0" }
+
+cortex-m = { version = "0.7.6" }
+cortex-m-rt = { version = "0.7" }
+embedded-storage = "0.3.0"
+embedded-storage-async = "0.3.0"
+cfg-if = "1.0.0"
+
+[features]
+defmt = [
+    "dep:defmt",
+    "embassy-boot-rp/defmt",
+    "embassy-rp/defmt",
+]
+debug = ["defmt-rtt", "defmt"]
+
+[patch.crates-io]
+embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
+embassy-hal-common = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
+embassy-boot = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
+embassy-rp = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
+embassy-boot-rp = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
+
+[profile.release]
+debug = true

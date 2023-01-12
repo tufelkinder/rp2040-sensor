@@ -182,14 +182,13 @@ fn main() -> ! {
         let cur_data = format!("{{id: 1, x: {:02}, y: {:02}, z: {:02}}}\r\n", acc_data.x, acc_data.y, acc_data.z);
         uart_c.write_str(cur_data.as_str()).unwrap();
 
-        // cortex_m::interrupt::free(|cs| {
-        //     // let mut u_c = UART_C.borrow(cs).take().expect("No UART obj found!");
-        //     let mut messages: Vec<String> = MSG_Q.borrow(cs).take();
+        cortex_m::interrupt::free(|cs| {
+            let mut messages = MSG_Q.borrow(cs).borrow_mut();
 
-        //     while let Some(msg) = messages.pop() {
-        //         uart_c.write_str(msg.as_str()).unwrap();
-        //     }
-        // });
+            while let Some(msg) = messages.pop() {
+                uart_c.write_str(msg.as_str()).unwrap();
+            }
+        });
 
         led1.set_low().unwrap();
         delay.delay_ms(500);
@@ -197,27 +196,25 @@ fn main() -> ! {
 
 }
 
-// #[interrupt]
-// fn UART0_IRQ() {  // upstream sensor comms
-//     let mut buffer = [0u8; 64];
+#[interrupt]
+fn UART0_IRQ() {  // upstream sensor comms
+    let mut buffer = [0u8; 64];
 
-//     let _bytes_read = cortex_m::interrupt::free(|cs| {
-//         let u_s = UART_S.borrow(cs).borrow();
-//         u_s.as_ref().unwrap().read_full_blocking(&mut buffer)
-//     });
+    let _bytes_read = cortex_m::interrupt::free(|cs| {
+        let u_s = UART_S.borrow(cs).borrow();
+        u_s.as_ref().unwrap().read_full_blocking(&mut buffer)
+    });
 
-//     if _bytes_read.is_ok() {
-//         let s: &str = core::str::from_utf8(&buffer).unwrap();
-//         cortex_m::interrupt::free(|cs| {
-//             // let mut u_c = UART_C.borrow(cs).take().expect("Error taking UART1.");
-//             // u_c.write_str(s).unwrap();
-
-//             let mut msg_q = MSG_Q.borrow(cs).take();
-//             msg_q.push(s.to_string());
-//         });
-//     }
-
-// }
+    if _bytes_read.is_ok() {
+        // let s: &str = core::str::from_utf8(&buffer).unwrap();
+            if let Ok(s) = core::str::from_utf8(&buffer) {
+                cortex_m::interrupt::free(|cs| {
+                let mut msgs = MSG_Q.borrow(cs).borrow_mut();
+                msgs.push(s.to_string());
+            });
+        }
+    }
+}
 
 // #[interrupt]
 // fn UART1_IRQ() {
