@@ -1,8 +1,11 @@
 import serial
 import json
 
+ser = serial.Serial(
+        port='/dev/ttyS0', #Replace ttyS0 with ttyAM0 for Pi1,Pi2,Pi0
+        baudrate = 115200
+)
 
-s = serial.Serial('COM4')
 data = []
 
 def compare(cur, last):
@@ -10,7 +13,7 @@ def compare(cur, last):
 	return result
 
 while True:
-	data = s.read()
+	data = ser.readline()
 	print(data)
 	l = data.encode('utf-8').replace('\r', '').replace('\n', '').replace(': ', '": "').replace(', ', '", "').replace('{', '{"').replace('}', '"}')
 	print(l)

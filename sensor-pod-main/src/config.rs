@@ -1,8 +1,9 @@
 #![allow(non_snake_case)]
 use defmt::Format;
 use embassy_boot_rp::AlignedBuffer;
-use embassy_rp::flash::{Flash, ERASE_SIZE};
+use embassy_rp::flash::{self, Flash, ERASE_SIZE};
 use embassy_rp::peripherals::FLASH;
+use heapless::String;
 use postcard::{from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +25,7 @@ pub enum Error {
 
 #[derive(Format, Serialize, Deserialize, Clone)]
 pub struct Config {
+    pub version: String<4>,
     pub heartbeat_interval: u8,
     pub THRESH_ACT: u8,
     pub TIME_INACT: u8,
@@ -43,35 +45,41 @@ impl From<Config> for adxl343::Config {
 }
 
 impl Config {
-    pub fn load(flash: &mut Flash<'_, FLASH, FLASH_SIZE>) -> Result<Self, Error> {
+    pub fn load(flash: &mut Flash<'_, FLASH, flash::Blocking, FLASH_SIZE>) -> Result<Self, Error> {
         let offset = unsafe { &__config_start as *const u32 as u32 };
         let mut read_buf = [0u8; ERASE_SIZE];
-        match flash.read(offset, &mut read_buf) {
+        match flash.blocking_read(offset, &mut read_buf) {
             Ok(_) => match from_bytes::<Self>(&mut read_buf) {
                 Ok(c) => Ok(c),
                 _ => {
                     defmt::info!("NO CONFIG");
-                    Ok(Default::default())
+                    let cfg: Self = Default::default();
+                    cfg.save(flash).ok();
+                    Ok(cfg)
                 }
             },
             Err(_) => Err(Error::Load),
         }
     }
 
-    pub fn save(&self, flash: &mut Flash<'_, FLASH, FLASH_SIZE>) -> Result<(), Error> {
+    pub fn save(&self, flash: &mut Flash<'_, FLASH, flash::Blocking, FLASH_SIZE>) -> Result<(), Error> {
         let from = unsafe { &__config_start as *const u32 as u32 };
         let to = unsafe { &__config_end as *const u32 as u32 };
         let mut buf: AlignedBuffer<ERASE_SIZE> = AlignedBuffer([0; ERASE_SIZE]);
         match to_slice(&self, &mut buf.0) {
             Ok(bytes) => flash
-                .erase(from, to)
-                .and_then(|_| flash.write(from, bytes))
+                .blocking_erase(from, to)
+                .and_then(|_| flash.blocking_write(from, bytes))
                 .map_err(|_| Error::Save),
             Err(_) => Err(Error::Save),
         }
     }
 
-    pub fn update_reg(flash: &mut Flash<'_, FLASH, FLASH_SIZE>, reg: Register, val: u8) -> Result<(), Error> {
+    pub fn update_reg(
+        flash: &mut Flash<'_, FLASH, flash::Blocking, FLASH_SIZE>,
+        reg: Register,
+        val: u8,
+    ) -> Result<(), Error> {
         let mut cfg = Self::load(flash)?;
         match reg {
             Register::THRESH_ACT => cfg.THRESH_ACT = val.max(1),
@@ -87,6 +95,7 @@ impl Config {
 impl<'a> Default for Config {
     fn default() -> Self {
         Self {
+            version: String::from("v1"),
             heartbeat_interval: 5,
             THRESH_ACT: 10,
             TIME_INACT: 2,

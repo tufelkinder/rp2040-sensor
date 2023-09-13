@@ -1,5 +1,5 @@
 use embassy_rp::uart::Error;
-use embedded_io::asynch::{Read, Write};
+use embedded_io_async::{Read, Write, WriteAllError};
 use serde::{Deserialize, Serialize};
 use serde_json_core::{from_slice, to_slice};
 
@@ -7,7 +7,7 @@ use serde_json_core::{from_slice, to_slice};
 pub async fn write_json<T: Serialize, const BUF_SIZE: usize>(
     tx: &mut impl Write<Error = Error>,
     msg: &T,
-) -> Result<(), Error> {
+) -> Result<(), WriteAllError<Error>> {
     let mut data = [b'\n'; BUF_SIZE];
     let n = to_slice(&msg, &mut data).unwrap();
     tx.write_all(&data[..n + 1]).await

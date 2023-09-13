@@ -6,6 +6,7 @@ mod adxl343;
 mod config;
 mod icd;
 mod json;
+use core::cell::RefCell;
 use core::str::FromStr;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 
@@ -14,24 +15,25 @@ use adxl343::{AccelData, Adxl343};
 use config::Config;
 use defmt::*;
 use embassy_boot_rp::*;
+use embassy_embedded_hal::flash::partition::BlockingPartition;
 use embassy_executor::Spawner;
-use embassy_executor::_export::StaticCell;
-use embassy_rp::flash::Flash;
+use embassy_rp::adc::{self, Adc};
+use embassy_rp::flash::{self, Flash};
 use embassy_rp::gpio::{AnyPin, Input, Level, Output, Pin, Pull};
 use embassy_rp::i2c::{self, Async, I2c};
-use embassy_rp::interrupt;
-use embassy_rp::peripherals::{FLASH, I2C0, UART0, UART1};
+use embassy_rp::peripherals::{ADC_TEMP_SENSOR, FLASH, I2C0, UART0, UART1};
 use embassy_rp::uart::{self, BufferedUart, BufferedUartRx, BufferedUartTx};
 use embassy_rp::watchdog::*;
-use embassy_rp::adc::{self, Adc};
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_sync::blocking_mutex::raw::{NoopRawMutex, ThreadModeRawMutex};
+use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::channel::{Channel, Receiver};
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Ticker, Timer};
-use futures::StreamExt;
+use embedded_storage::nor_flash::NorFlash;
 use heapless::String;
 use icd::*;
 use json::*;
+use static_cell::make_static;
 use {defmt_rtt as _, panic_probe as _};
 
 const SELF_ID: u32 = 0;
@@ -50,15 +52,6 @@ static SENSOR_CH: Channel<ThreadModeRawMutex, SensorCmd, 64> = Channel::new();
 static FLASH_CH: Channel<ThreadModeRawMutex, FlashCmd, 8> = Channel::new();
 static REQ_LED_CH: Channel<ThreadModeRawMutex, (), 8> = Channel::new();
 static RES_LED_CH: Channel<ThreadModeRawMutex, (), 8> = Channel::new();
-
-macro_rules! singleton {
-    ($val:expr) => {{
-        type T = impl Sized;
-        static STATIC_CELL: StaticCell<T> = StaticCell::new();
-        let (x,) = STATIC_CELL.init(($val,));
-        x
-    }};
-}
 
 enum SensorCmd {
     Poll,
@@ -82,6 +75,13 @@ enum SensorInt {
     //Int2,
 }
 
+embassy_rp::bind_interrupts!(struct Irqs {
+    I2C0_IRQ => i2c::InterruptHandler<I2C0>;
+    UART0_IRQ => uart::BufferedInterruptHandler<UART0>;
+    UART1_IRQ => uart::BufferedInterruptHandler<UART1>;
+    ADC_IRQ_FIFO => adc::InterruptHandler;
+});
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
@@ -89,28 +89,25 @@ async fn main(spawner: Spawner) {
     UPTIME.store(0, Ordering::Release);
 
     Timer::after(Duration::from_millis(100)).await; // Wait for RTT
-    let mut flash = Flash::<_, FLASH_SIZE>::new(p.FLASH);
+    let mut flash = Flash::<_, _, FLASH_SIZE>::new_blocking(p.FLASH);
 
     let config = unwrap!(Config::load(&mut flash));
     info!("{:?}", config);
     HEARTBEAT_TX_INTERVAL.store(config.heartbeat_interval, Ordering::Release);
 
     let (sda, scl) = (p.PIN_20, p.PIN_21);
-    let i2c_irq = interrupt::take!(I2C0_IRQ);
-    let i2c = I2c::new_async(p.I2C0, scl, sda, i2c_irq, i2c::Config::default());
+    let i2c = I2c::new_async(p.I2C0, scl, sda, Irqs, i2c::Config::default());
     let sensor = unwrap!(Adxl343::new(i2c, config.into()).await);
 
     let uart_config = uart::Config::default();
-    let uart1_irq = interrupt::take!(UART1_IRQ);
     let (dtx_pin, drx_pin, uart1) = (p.PIN_4, p.PIN_5, p.UART1);
-    let (drx_buf, dtx_buf) = (&mut singleton!([0u8; 128])[..], &mut singleton!([0u8; 128])[..]);
-    let mut uart1 = BufferedUart::new(uart1, uart1_irq, dtx_pin, drx_pin, dtx_buf, drx_buf, uart_config);
+    let (drx_buf, dtx_buf) = (&mut make_static!([0u8; 128])[..], &mut make_static!([0u8; 128])[..]);
+    let uart1 = BufferedUart::new(uart1, Irqs, dtx_pin, drx_pin, dtx_buf, drx_buf, uart_config);
     let (drx, dtx) = uart1.split();
 
-    let uart0_irq = interrupt::take!(UART0_IRQ);
     let (utx_pin, urx_pin, uart0) = (p.PIN_16, p.PIN_17, p.UART0);
-    let (urx_buf, utx_buf) = (&mut singleton!([0u8; 128])[..], &mut singleton!([0u8; 128])[..]);
-    let mut uart0 = BufferedUart::new(uart0, uart0_irq, utx_pin, urx_pin, utx_buf, urx_buf, uart_config);
+    let (urx_buf, utx_buf) = (&mut make_static!([0u8; 128])[..], &mut make_static!([0u8; 128])[..]);
+    let uart0 = BufferedUart::new(uart0, Irqs, utx_pin, urx_pin, utx_buf, urx_buf, uart_config);
     let (urx, utx) = uart0.split();
 
     let req_led = Output::new(p.PIN_10.degrade(), Level::Low);
@@ -118,19 +115,18 @@ async fn main(spawner: Spawner) {
     let int1_pin = Input::new(p.PIN_19.degrade(), Pull::None);
     // let int2_pin = Input::new(p.PIN_18.degrade(), Pull::None);
 
-    let adc_irq = interrupt::take!(ADC_IRQ_FIFO);
-    let adc = Adc::new(p.ADC, adc_irq, adc::Config::default());
+    let adc = Adc::new(p.ADC, Irqs, adc::Config::default());
 
-    unwrap!(spawner.spawn(led_task(REQ_LED_CH.receiver(), req_led)));
-    unwrap!(spawner.spawn(led_task(RES_LED_CH.receiver(), res_led)));
-    unwrap!(spawner.spawn(int_task(SensorInt::Int1, int1_pin)));
-    // unwrap!(spawner.spawn(int_task(SensorInt::Int2, int2_pin)));
-    unwrap!(spawner.spawn(sensor_task(sensor)));
-    unwrap!(spawner.spawn(flash_task(flash, adc)));
-    unwrap!(spawner.spawn(upstream_tx_task(utx)));
-    unwrap!(spawner.spawn(upstream_rx_task(urx)));
-    unwrap!(spawner.spawn(downstream_tx_task(dtx)));
-    unwrap!(spawner.spawn(downstream_rx_task(drx)));
+    spawner.must_spawn(led_task(REQ_LED_CH.receiver(), req_led));
+    spawner.must_spawn(led_task(RES_LED_CH.receiver(), res_led));
+    spawner.must_spawn(int_task(SensorInt::Int1, int1_pin));
+    // spawner.must_spawn(int_task(SensorInt::Int2, int2_pin));
+    spawner.must_spawn(sensor_task(sensor));
+    spawner.must_spawn(flash_task(flash, adc, p.ADC_TEMP_SENSOR));
+    spawner.must_spawn(upstream_tx_task(utx));
+    spawner.must_spawn(upstream_rx_task(urx));
+    spawner.must_spawn(downstream_tx_task(dtx));
+    spawner.must_spawn(downstream_rx_task(drx));
 
     let mut watchdog = Watchdog::new(p.WATCHDOG);
     watchdog.start(Duration::from_secs(8));
@@ -161,7 +157,7 @@ async fn int_task(id: SensorInt, mut pin: Input<'static, AnyPin>) {
 #[embassy_executor::task(pool_size = 2)]
 async fn led_task(receiver: Receiver<'static, ThreadModeRawMutex, (), 8>, mut pin: Output<'static, AnyPin>) {
     loop {
-        receiver.recv().await;
+        receiver.receive().await;
         pin.set_high();
         Timer::after(Duration::from_millis(50)).await;
         pin.set_low();
@@ -172,7 +168,7 @@ async fn led_task(receiver: Receiver<'static, ThreadModeRawMutex, (), 8>, mut pi
 #[embassy_executor::task]
 async fn sensor_task(mut sensor: Adxl343<I2c<'static, I2C0, Async>>) {
     loop {
-        match SENSOR_CH.recv().await {
+        match SENSOR_CH.receive().await {
             SensorCmd::Event(_int) => {
                 if let Ok(src) = sensor.interrupt_source().await {
                     if src.is_single_tap() {
@@ -210,48 +206,77 @@ async fn sensor_task(mut sensor: Adxl343<I2c<'static, I2C0, Async>>) {
 }
 
 #[embassy_executor::task]
-async fn flash_task(mut flash: Flash<'static, FLASH, FLASH_SIZE>, mut adc: Adc<'static>) {
-    let mut updater = FirmwareUpdater::default();
-    let mut writer = None;
+async fn flash_task(
+    flash: Flash<'static, FLASH, flash::Blocking, FLASH_SIZE>,
+    mut adc: Adc<'static, adc::Async>,
+    temp_sensor: ADC_TEMP_SENSOR,
+) {
+    let mut temp_sensor = adc::Channel::new_temp_sensor(temp_sensor);
+    let flash: Mutex<NoopRawMutex, _> = Mutex::new(RefCell::new(flash));
+
+    extern "C" {
+        static __bootloader_state_start: u32;
+        static __bootloader_state_end: u32;
+        static __bootloader_dfu_start: u32;
+        static __bootloader_dfu_end: u32;
+    }
+
+    let mut dfu = {
+        let start = unsafe { &__bootloader_dfu_start as *const u32 as u32 };
+        let end = unsafe { &__bootloader_dfu_end as *const u32 as u32 };
+        BlockingPartition::new(&flash, start, end - start)
+    };
+
+    let state = {
+        let start = unsafe { &__bootloader_state_start as *const u32 as u32 };
+        let end = unsafe { &__bootloader_state_end as *const u32 as u32 };
+        BlockingPartition::new(&flash, start, end - start)
+    };
+
+    let mut aligned = AlignedBuffer([0; 1]);
+    let mut state = BlockingFirmwareState::new(state, &mut aligned.0);
+
     loop {
-        match FLASH_CH.recv().await {
+        match FLASH_CH.receive().await {
             FlashCmd::SetHeartbeat(val) => {
                 info!("SET HEARTBEAT TX INTERVAL");
-                let mut cfg = unwrap!(Config::load(&mut flash));
-                cfg.heartbeat_interval = val;
-                unwrap!(cfg.save(&mut flash));
+                flash.lock(|f| {
+                    let mut cfg = unwrap!(Config::load(&mut f.borrow_mut()));
+                    cfg.heartbeat_interval = val;
+                    unwrap!(cfg.save(&mut f.borrow_mut()));
+                });
             }
             FlashCmd::ResetConfig(defer_reboot) => {
                 info!("RESET CONFIG");
                 let cfg: Config = Default::default();
-                unwrap!(cfg.save(&mut flash));
+                flash.lock(|f| unwrap!(cfg.save(&mut f.borrow_mut())));
                 reboot(defer_reboot);
             }
             FlashCmd::SetConfigReg(reg, val) => {
                 info!("SET CONFIG REG");
-                unwrap!(Config::update_reg(&mut flash, reg, val));
+                flash.lock(|f| unwrap!(Config::update_reg(&mut f.borrow_mut(), reg, val)));
             }
             FlashCmd::DfuWrite(offset, data, is_done) => {
                 info!("DFU");
-                let w = writer.get_or_insert_with(|| unwrap!(updater.prepare_update_blocking(&mut flash)));
                 let mut buf: AlignedBuffer<4096> = AlignedBuffer([0; 4096]);
                 buf.0[..data.len()].copy_from_slice(data);
-                w.write_block_blocking(offset, &buf.0[..], &mut flash, 256).unwrap();
+                dfu.erase(offset as u32, (offset + data.len()) as u32).unwrap();
+                dfu.write(offset as _, &buf.0[..data.len()]).unwrap();
                 if is_done {
-                    updater.mark_updated_blocking(&mut flash, &mut buf.0[..1]).unwrap();
+                    state.mark_updated().unwrap();
                     DFU_UPDATED.signal(());
                 }
             }
             FlashCmd::DfuMarkBooted => {
                 info!("DFU MARK AS BOOTED");
-                let mut buf: AlignedBuffer<1> = AlignedBuffer([0; 1]);
-                updater.mark_booted_blocking(&mut flash, &mut buf.0).unwrap();
+                state.mark_booted().unwrap();
             }
             FlashCmd::Status => {
                 info!("GET STATUS");
-                let config = unwrap!(Config::load(&mut flash));
-                let temp = adc.read_temperature().await;
-                RES_CH.send(status_response(config, temp)).await;
+                let config = flash.lock(|f| unwrap!(Config::load(&mut f.borrow_mut())));
+                if let Ok(temp) = adc.read(&mut temp_sensor).await {
+                    RES_CH.send(status_response(config, temp)).await;
+                }
             }
         }
     }
@@ -265,7 +290,7 @@ async fn downstream_rx_task(rx: BufferedUartRx<'static, UART1>) {
 #[embassy_executor::task]
 async fn upstream_tx_task(mut tx: BufferedUartTx<'static, UART0>) {
     loop {
-        let mut req = REQ_CH.recv().await;
+        let mut req = REQ_CH.receive().await;
         if let Some(id) = req.id {
             req.id.replace(id - 1);
         }
@@ -285,7 +310,7 @@ async fn upstream_rx_task(rx: BufferedUartRx<'static, UART0>) {
 #[embassy_executor::task]
 async fn downstream_tx_task(mut tx: BufferedUartTx<'static, UART1>) {
     loop {
-        let res = RES_CH.recv().await;
+        let res = RES_CH.receive().await;
         unwrap!(write_json::<_, 256>(&mut tx, &res).await);
         let _ = RES_LED_CH.try_send(());
     }

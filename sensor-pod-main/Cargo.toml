@@ -4,15 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-embassy-executor = { version = "0.1.0", features = ["defmt", "integrated-timers"] }
-embassy-sync = { version = "0.1.0", features = ["defmt"] }
-embassy-time = { version = "0.1.0", features = ["defmt", "defmt-timestamp-uptime"] }
+embassy-executor = { version = "0.3.0", features = ["nightly", "arch-cortex-m", "executor-thread", "defmt", "integrated-timers"] }
+embassy-sync = { version = "0.2.0", features = ["defmt"] }
+embassy-time = { version = "0.1.3", features = ["defmt", "defmt-timestamp-uptime"] }
 embassy-rp = { version = "0.1.0", features = ["defmt", "unstable-traits", "nightly", "unstable-pac", "time-driver", "critical-section-impl"] }
 embassy-boot-rp = { version = "0.1.0", default-features = false }
 embassy-usb-logger = { version = "0.1.0" }
+embassy-embedded-hal = { version = "0.1.0", features = ["defmt"] }
 
-atomic-polyfill = "0.1.5"
-static_cell = "1.0"
+atomic-polyfill = "1.0.1"
+static_cell = { version = "1.1", features = ["nightly"]}
 
 defmt = "0.3"
 defmt-rtt = "0.4"
@@ -22,9 +23,10 @@ cortex-m = "0.7.6"
 cortex-m-rt = "0.7.0"
 futures = { version = "0.3.17", default-features = false, features = ["async-await", "cfg-target-has-atomic", "unstable"] }
 
-embedded-hal-1 = { package = "embedded-hal", version = "1.0.0-alpha.9" }
-embedded-hal-async = { version = "0.2.0-alpha.0" }
-embedded-io = { version = "0.4.0", features = ["async", "defmt"] }
+embedded-hal-1 = { package = "embedded-hal", version = "=1.0.0-rc.1" }
+embedded-hal-async = "1.0.0-rc.1"
+embedded-io-async = { version = "0.5.0", features = ["defmt-03"] }
+embedded-storage = "0.3.0"
 
 heapless = { version = "0.7.16", features = ["defmt-impl", "serde"] }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
@@ -36,16 +38,21 @@ bitflags = "1"
 panic-reset = "0.1.1"
 
 [patch.crates-io]
-embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
-embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
-embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
-embassy-hal-common = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
-embassy-futures = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
-embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
-embassy-boot = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
-embassy-rp = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
-embassy-boot-rp = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
-embassy-usb-logger = { git = "https://github.com/embassy-rs/embassy", rev = "35afb60dd490d95a972ad64db8a38652538bceba" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "2c38dd17b9a5a507fc77d90d78486e4764234752" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "2c38dd17b9a5a507fc77d90d78486e4764234752" }
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy", rev = "2c38dd17b9a5a507fc77d90d78486e4764234752" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy", rev = "2c38dd17b9a5a507fc77d90d78486e4764234752" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "2c38dd17b9a5a507fc77d90d78486e4764234752" }
+embassy-boot = { git = "https://github.com/embassy-rs/embassy", rev = "2c38dd17b9a5a507fc77d90d78486e4764234752" }
+embassy-rp = { git = "https://github.com/embassy-rs/embassy", rev = "2c38dd17b9a5a507fc77d90d78486e4764234752" }
+embassy-boot-rp = { git = "https://github.com/embassy-rs/embassy", rev = "2c38dd17b9a5a507fc77d90d78486e4764234752" }
+embassy-usb-logger = { git = "https://github.com/embassy-rs/embassy", rev = "2c38dd17b9a5a507fc77d90d78486e4764234752" }
 
 [profile.release]
-debug = true
+codegen-units = 1
+debug = 2
+debug-assertions = false
+incremental = false
+lto = "fat"
+opt-level = 's'
+overflow-checks = false

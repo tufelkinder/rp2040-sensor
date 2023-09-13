@@ -1,26 +1,31 @@
 #![no_std]
 #![no_main]
 
+use core::cell::RefCell;
+
 use cortex_m_rt::{entry, exception};
 #[cfg(feature = "defmt")]
 use defmt_rtt as _;
 use embassy_boot_rp::*;
-use embassy_rp::flash::{Flash, ERASE_SIZE};
+use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::Duration;
+// use embassy_rp::flash::Flash;
+// use embassy_rp::peripherals::FLASH;
 
 const FLASH_SIZE: usize = 2 * 1024 * 1024;
 
 #[entry]
 fn main() -> ! {
     let p = embassy_rp::init(Default::default());
-    let mut bl: BootLoader = BootLoader::default();
     let flash = WatchdogFlash::<FLASH_SIZE>::start(p.FLASH, p.WATCHDOG, Duration::from_secs(8));
-    // let flash: Flash<_, FLASH_SIZE> = Flash::new(p.FLASH);
-    let mut flash = BootFlash::<_, ERASE_SIZE>::new(flash);
-    let start = bl.prepare(&mut SingleFlashConfig::new(&mut flash));
-    core::mem::drop(flash);
+    // let flash = Flash::<'_, FLASH, _, FLASH_SIZE>::new_blocking(p.FLASH);
+    let flash = Mutex::new(RefCell::new(flash));
 
-    unsafe { bl.load(start) }
+    let config = BootLoaderConfig::from_linkerfile_blocking(&flash);
+    let active_offset = config.active.offset();
+    let bl: BootLoader = BootLoader::prepare(config);
+
+    unsafe { bl.load(embassy_rp::flash::FLASH_BASE as u32 + active_offset) }
 }
 
 #[no_mangle]
